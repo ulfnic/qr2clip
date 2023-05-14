@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -o errexit
+
+
+help_doc (){
+	cat <<-'HelpDoc'
+		qr2clip: Read a QR code within a screen-grab and put it in your clipboard.
+
+		-n|--notify        # Optional, send errors to notify-send
+		-m|--morphology    # Optional, attempt to recover a damaged qr code using morphology
+		-h|--help          # Optional, output help
+
+		Examples of use:
+		  qr2clip
+
+	HelpDoc
+	exit 0
+}
+
+
+
+print_stderr() {
+	if [[ $2 ]]; then
+		if [[ $notify ]]; then
+			notify-send "$2"
+		else
+			printf "$2" "${@:3}" 1>&2
+		fi
+	fi
+	[[ $1 == '0' ]] || exit $1
+}
+
+
+
+while [[ $1 ]]; do
+	case $1 in
+		'--notify'|'-n')
+			notify=1;;
+		'--morphology'|'-m')
+			morphology=1;;
+		'--help'|'-h')
+			help_doc ;;
+		*)
+			print_stderr 1 '%s\n' 'Unrecognized parameter: '"$1" ;;
+	esac
+	shift
+done
+
+
+
+# Define display server
+if [[ $DISPLAY ]]; then
+	[[ $WAYLAND_DISPLAY ]] && display_server='xwayland' || display_server='x11'
+else
+	display_server='wayland'
+fi
+
+
+
+# Check dependencies
+type zbarimg &> /dev/null || print_stderr 1 '%s\n' 'Missing dependency: zbarimg'
+
+if [[ $morphology ]]; then
+	type convert &> /dev/null || print_stderr 1 '%s\n' 'Missing dependency for morphology: convert'
+fi
+
+if [[ $display_server == 'wayland' ]] || [[ $display_server == 'xwayland' ]]; then
+	type wl-copy &> /dev/null || print_stderr 1 '%s\n' 'Missing dependency: wl-copy'
+	type slurp &> /dev/null || print_stderr 1 '%s\n' 'Missing dependency: slurp'
+	type grim &> /dev/null || print_stderr 1 '%s\n' 'Missing dependency: grim'
+	clipboard_cmd='wl-copy'
+
+elif [[ $display_server == 'x11' ]]; then
+	if type maim &> /dev/null; then
+		screen_select_cmd='maim --select --hidecursor --format=png --quality=10 /dev/fd/1'
+	elif type import &> /dev/null; then
+		screen_select_cmd='import -silent -quality 100 bmp:-'
+	else
+		print_stderr 1 '%s\n' 'Missing dependency: maim or import'
+	fi
+
+	if type xsel &> /dev/null; then
+		clipboard_cmd='xsel --input --clipboard'
+	elif type xclip &> /dev/null; then
+		clipboard_cmd='xclip -in -selection clipboard'
+	else
+		print_stderr 1 '%s\n' 'Missing dependency: xsel or xclip'
+	fi
+fi
+
+
+
+# Stdout user's screen selection
+function screen_select(){
+	if [[ $display_server == 'wayland' ]] || [[ $display_server == 'xwayland' ]]; then
+		# Get selection and honor escape key
+		grim -t png -l 9 -g "$(slurp)" -
+
+	elif [[ $display_server == 'x11' ]]; then
+		$screen_select_cmd
+
+	fi
+}
+
+
+
+# Interpret QR code
+function interpret_qr_code() {
+	zbarimg --set test-inverted --raw -
+}
+
+
+
+# Empty clipboard to avoid false positives
+printf '' | $clipboard_cmd
+
+if [[ $morphology ]]; then
+	screen_select | convert png:- +repage -threshold 50% -morphology open square:1 - | { interpret_qr_code || print_stderr 1 '%s\n' 'Failed to interpret'; } | $clipboard_cmd
+else
+	screen_select | { interpret_qr_code || print_stderr 1 '%s\n' 'Failed to interpret'; } | $clipboard_cmd
+fi
+
+
+
