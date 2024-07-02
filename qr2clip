@@ -106,7 +106,7 @@ function screen_select(){
 
 # Interpret QR code
 function interpret_qr_code() {
-	zbarimg --set test-inverted --raw -
+	zbarimg --oneshot --set test-inverted --raw -
 }
 
 
