@@ -21,7 +21,7 @@ qr2clip
 - `qr2clip`
 
 #### X11:
-- `maim` or `import`
+- `maim`, `import`, or `flameshot`
 - `xclip` or `xsel`
 
 #### Wayland:
